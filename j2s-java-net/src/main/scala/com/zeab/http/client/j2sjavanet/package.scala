@@ -10,6 +10,7 @@ import scala.annotation.tailrec
 import scala.io.Codec
 import scala.io.Source.fromInputStream
 import scala.util.{Failure, Success, Try}
+import scala.concurrent.{ExecutionContext, Future}
 
 package object j2sjavanet {
 
@@ -17,8 +18,10 @@ package object j2sjavanet {
 
     case class Seed(httpSeed: HttpSeed) {
       def toHttpResponse: Either[HttpError, HttpResponse] = httpResponse(httpSeed.url, httpSeed.method, httpSeed.body, httpSeed.headers, httpSeed.metaData)
+      def toAsyncHttpResponse(implicit ec:ExecutionContext): Future[Either[HttpError, HttpResponse]] = asyncHttpResponse(httpSeed.url, httpSeed.method, httpSeed.body, httpSeed.headers, httpSeed.metaData)
     }
 
+    //Http Responses
     private def httpResponse(url: String, method: String, body: Option[String] = None, headers: Option[Map[String, String]] = None, metaData: Option[Map[String, String]] = None): Either[HttpError, HttpResponse] = {
       openConnection(url) match {
         case Right(openConn) =>
@@ -47,6 +50,13 @@ package object j2sjavanet {
       }
     }
 
+    private def asyncHttpResponse(url: String, method: String, body: Option[String] = None, headers: Option[Map[String, String]] = None, metaData: Option[Map[String, String]] = None)(implicit ec:ExecutionContext): Future[Either[HttpError, HttpResponse]] ={
+      Future{
+        httpResponse(url, method, body, headers, metaData)
+      }
+    }
+
+    //Internal
     private def openConnection(url: String): Either[Throwable, HttpURLConnection] = {
       Try(new URL(url).openConnection.asInstanceOf[HttpURLConnection]) match {
         case Success(value) =>
