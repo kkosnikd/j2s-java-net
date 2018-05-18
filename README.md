@@ -1,1 +1,1 @@
-[![Build Status](https://travis-ci.org/zeab/j2s-java-net.svg?branch=master)](https://travis-ci.org/zeab/j2s-java-net)
+[![Build Status](https://travis-ci.org/zeab/j2s-java-net.svg?branch=master)](https://travis-ci.org/zeab/j2s-java-net)[![Codacy Badge](https://api.codacy.com/project/badge/Grade/c852aecf3cf14e7e8257feebd113f6e4)](https://www.codacy.com/app/zeab/j2s-java-net?utm_source=github.com&amp;utm_medium=referral&amp;utm_content=zeab/j2s-java-net&amp;utm_campaign=Badge_Grade)
