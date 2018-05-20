@@ -1,44 +1,64 @@
 package com.zeab.http.client
 
 //Imports
-import com.zeab.http.seed.{HttpError, HttpResponse, HttpSeed}
+import com.zeab.http.seed._
 //Java
 import java.net.{HttpURLConnection, URL}
 import java.nio.charset.CodingErrorAction
 //Scala
+import scala.collection.JavaConversions._
 import scala.annotation.tailrec
+import scala.concurrent.{ExecutionContext, Future}
 import scala.io.Codec
 import scala.io.Source.fromInputStream
 import scala.util.{Failure, Success, Try}
-import scala.concurrent.{ExecutionContext, Future}
 
 package object j2sjavanet {
 
   trait HttpClient {
 
-    case class Seed(httpSeed: HttpSeed) {
-      def toHttpResponse: Either[HttpError, HttpResponse] = httpResponse(httpSeed.url, httpSeed.method, httpSeed.body, httpSeed.headers, httpSeed.metaData)
-      def toAsyncHttpResponse(implicit ec:ExecutionContext): Future[Either[HttpError, HttpResponse]] = asyncHttpResponse(httpSeed.url, httpSeed.method, httpSeed.body, httpSeed.headers, httpSeed.metaData)
+    //Http Responses
+    private def asyncHttpResponse(url: String, method: String, body: Option[String] = None, headers: Option[Map[String, String]] = None, metaData: Option[Map[String, String]] = None)(implicit ec: ExecutionContext): Future[Either[HttpError, HttpResponse]] = {
+      Future {
+        httpResponse(url, method, body, headers, metaData)
+      }
     }
 
-    //Http Responses
     private def httpResponse(url: String, method: String, body: Option[String] = None, headers: Option[Map[String, String]] = None, metaData: Option[Map[String, String]] = None): Either[HttpError, HttpResponse] = {
+
+      //Calculate authorization if one is required
+      val combineHeaders = authorization(url, method, body, headers, metaData).getOrElse(Map.empty) ++ headers.getOrElse(Map.empty)
+      val completedHeaders =
+        if (combineHeaders.isEmpty) {
+          None
+        }
+        else {
+          Some(combineHeaders)
+        }
+
+      //Open Url Connection
       openConnection(url) match {
         case Right(openConn) =>
+          //Add Connection Timeout Value
           addConnectionTimeout(openConn, metaData) match {
             case Right(connTimeoutConn) =>
+              //Add Request Timeout Value
               addRequestTimeout(connTimeoutConn, metaData) match {
                 case Right(reqTimeoutConn) =>
+                  //Add the method
                   addMethod(reqTimeoutConn, method) match {
                     case Right(methodConn) =>
-                      addHeaders(methodConn, headers) match {
+                      //Add the headers
+                      addHeaders(methodConn, completedHeaders) match {
                         case Right(headerConn) =>
+                          //Add the body
                           addBody(headerConn, body) match {
                             case Right(bodyConn) =>
-                              getResponse(bodyConn, url, method, body, headers, metaData)
-                            case Left(ex) => Left(HttpError(ex.toString, url, method, body, headers, metaData))
+                              //Get the response
+                              getResponse(bodyConn, url, method, body, completedHeaders, metaData)
+                            case Left(ex) => Left(HttpError(ex.toString, url, method, body, completedHeaders, metaData))
                           }
-                        case Left(ex) => Left(HttpError(ex.toString, url, method, body, headers, metaData))
+                        case Left(ex) => Left(HttpError(ex.toString, url, method, body, completedHeaders, metaData))
                       }
                     case Left(ex) => Left(HttpError(ex.toString, url, method, body, headers, metaData))
                   }
@@ -47,12 +67,6 @@ package object j2sjavanet {
             case Left(ex) => Left(HttpError(ex.toString, url, method, body, headers, metaData))
           }
         case Left(ex) => Left(HttpError(ex.toString, url, method, body, headers, metaData))
-      }
-    }
-
-    private def asyncHttpResponse(url: String, method: String, body: Option[String] = None, headers: Option[Map[String, String]] = None, metaData: Option[Map[String, String]] = None)(implicit ec:ExecutionContext): Future[Either[HttpError, HttpResponse]] ={
-      Future{
-        httpResponse(url, method, body, headers, metaData)
       }
     }
 
@@ -94,6 +108,7 @@ package object j2sjavanet {
             worker(openConn, headers.drop(1), headerConn)
         }
       }
+
       worker(openConn, headers.getOrElse(Map.empty), Right(openConn))
     }
 
@@ -156,20 +171,64 @@ package object j2sjavanet {
       codec.onMalformedInput(CodingErrorAction.REPLACE)
       Try(openConn.getInputStream) match {
         case Success(stream) =>
-          val responseBody = fromInputStream(stream).mkString
-          Right(HttpResponse(url, method, body, headers, metaData, openConn.getResponseCode, Some(responseBody), Some(openConn.getHeaderFields.toString), 0))
+          Right(
+            HttpResponse(
+              url,
+              method,
+              body,
+              headers,
+              metaData,
+              openConn.getResponseCode,
+              Some(fromInputStream(stream).mkString),
+              Some(formatHeaders(openConn)),
+              0))
+        //TODO make sure to add the timer stuff in
         case Failure(ex) =>
           //Since 4x and 5x are exceptions were catching them here and returning them as valid responses
           if (ex.getMessage.contains("Server returned HTTP response code:")) {
-            Right(HttpResponse(url, method, body, headers, metaData, openConn.getResponseCode, Some(ex.toString), Some(openConn.getHeaderFields.toString), 0))
+            Right(
+              HttpResponse(
+                url,
+                method,
+                body,
+                headers,
+                metaData,
+                openConn.getResponseCode,
+                Some(ex.toString),
+                Some(formatHeaders(openConn)),
+                0))
+            //TODO make sure to add the timer stuff in
           }
           else {
-            Left(HttpError(ex.toString, url, method, body, headers, metaData))
+            Left(
+              HttpError(
+                ex.toString,
+                url,
+                method,
+                body,
+                headers,
+                metaData))
           }
       }
     }
 
-    def authorization = ???
+    //Format the response headers so they are easy to consume
+    private def formatHeaders(openConn: HttpURLConnection): Map[String, String] = {
+      openConn.getHeaderFields.toMap.map { headers =>
+        val (headerKey, headerValues) = headers
+        headerKey -> headerValues.toList.mkString(" ")
+      }
+    }
+
+    //Allow for overriding the authorization to custom one's
+    def authorization(url: String, method: String, body: Option[String], headers: Option[Map[String, String]], metaData: Option[Map[String, String]]): Option[Map[String, String]] = HttpHeaders.authorizationBearerHeader(HttpSeedMetaData.bearerCheck(metaData))
+
+    case class Seed(httpSeed: HttpSeed) {
+      def toHttpResponse: Either[HttpError, HttpResponse] = httpResponse(httpSeed.url, httpSeed.method, httpSeed.body, httpSeed.headers, httpSeed.metaData)
+
+      def toAsyncHttpResponse(implicit ec: ExecutionContext): Future[Either[HttpError, HttpResponse]] = asyncHttpResponse(httpSeed.url, httpSeed.method, httpSeed.body, httpSeed.headers, httpSeed.metaData)
+    }
+
   }
 
   object HttpClient extends HttpClient
