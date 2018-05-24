@@ -229,15 +229,20 @@ package object j2sjavanet {
 
       def toAsyncHttpResponse(implicit ec: ExecutionContext): Future[Either[HttpError, HttpResponse]] = asyncHttpResponse(httpSeed.url, httpSeed.method, httpSeed.body, httpSeed.headers, httpSeed.metaData)
 
-      def retryHttpResponse(successfulResponseStatus:Int ,retryInterval:Int = 1): Either[HttpError, HttpResponse] ={
+      def retryHttpResponse(successfulResponseStatus:Int ,retryInterval:Int = 1, maxRetry:Int = 5): Either[HttpError, HttpResponse] ={
         def retry(httpResponse1:Either[HttpError, HttpResponse], startTime:Double): Either[HttpError, HttpResponse] ={
-          def worker(httpResponse1:Either[HttpError, HttpResponse], startTime:Double): Either[HttpError, HttpResponse] ={
+          def worker(httpResponse1:Either[HttpError, HttpResponse], startTime:Double, retryCount:Int = 0): Either[HttpError, HttpResponse] ={
             httpResponse1 match {
               case Right(resp) =>
                 if(resp.responseStatus == successfulResponseStatus){Right(resp)}
                 else{
-                  if(((System.nanoTime - startTime) / 1e9) >= retryInterval){worker(httpResponse(resp.requestUrl, resp.requestMethod, resp.requestBody, resp.requestHeaders, resp.requestMetaData), System.nanoTime)}
-                  else{worker(httpResponse1, startTime)}}
+                  if(retryCount == maxRetry){
+                    Left(HttpError(s"Reached Max Retry $retryCount", resp.requestUrl, resp.requestMethod, resp.requestBody, resp.requestHeaders, resp.requestMetaData))
+                  }
+                  else {
+                    if(((System.nanoTime - startTime) / 1e9) >= retryInterval){worker(httpResponse(resp.requestUrl, resp.requestMethod, resp.requestBody, resp.requestHeaders, resp.requestMetaData), System.nanoTime, retryCount + 1)}
+                    else{worker(httpResponse1, startTime, retryCount)}}
+                  }
               case Left(ex) => Left(ex)}}
           worker(httpResponse1, startTime)}
         retry(httpResponse(httpSeed.url, httpSeed.method, httpSeed.body, httpSeed.headers, httpSeed.metaData), System.nanoTime)}

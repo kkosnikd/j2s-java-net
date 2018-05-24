@@ -6,7 +6,7 @@ object App extends App{
 
   println(HttpClient.Seed(HttpSeed("http://google.com")).toHttpResponse)
 
-  println(HttpClient.Seed(HttpSeed("http://google.com")).retryHttpResponse(200, 1))
+  println(HttpClient.Seed(HttpSeed("http://google.com")).retryHttpResponse(201, 1))
 
 
 
