@@ -36,6 +36,8 @@ package object j2sjavanet {
           Some(combineHeaders)
         }
 
+      val shouldRetry = true
+
       //Open Url Connection
       openConnection(url) match {
         case Right(openConn) =>
@@ -54,7 +56,6 @@ package object j2sjavanet {
                           //Add the body
                           addBody(headerConn, body) match {
                             case Right(bodyConn) =>
-                              //Get the response
                               getResponse(bodyConn, url, method, body, completedHeaders, metaData)
                             case Left(ex) => Left(HttpError(ex.toString, url, method, body, completedHeaders, metaData))
                           }
@@ -227,6 +228,19 @@ package object j2sjavanet {
       def toHttpResponse: Either[HttpError, HttpResponse] = httpResponse(httpSeed.url, httpSeed.method, httpSeed.body, httpSeed.headers, httpSeed.metaData)
 
       def toAsyncHttpResponse(implicit ec: ExecutionContext): Future[Either[HttpError, HttpResponse]] = asyncHttpResponse(httpSeed.url, httpSeed.method, httpSeed.body, httpSeed.headers, httpSeed.metaData)
+
+      def retryHttpResponse(successfulResponseStatus:Int ,retryInterval:Int = 1): Either[HttpError, HttpResponse] ={
+        def retry(httpResponse1:Either[HttpError, HttpResponse], startTime:Double): Either[HttpError, HttpResponse] ={
+          def worker(httpResponse1:Either[HttpError, HttpResponse], startTime:Double): Either[HttpError, HttpResponse] ={
+            httpResponse1 match {
+              case Right(resp) =>
+                if(resp.responseStatus == successfulResponseStatus){Right(resp)}
+                else{
+                  if(((System.nanoTime - startTime) / 1e9) >= retryInterval){worker(httpResponse(resp.requestUrl, resp.requestMethod, resp.requestBody, resp.requestHeaders, resp.requestMetaData), System.nanoTime)}
+                  else{worker(httpResponse1, startTime)}}
+              case Left(ex) => Left(ex)}}
+          worker(httpResponse1, startTime)}
+        retry(httpResponse(httpSeed.url, httpSeed.method, httpSeed.body, httpSeed.headers, httpSeed.metaData), System.nanoTime)}
     }
 
   }
