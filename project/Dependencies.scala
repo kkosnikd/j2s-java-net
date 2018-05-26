@@ -7,7 +7,7 @@ object Dependencies {
   //List of Versions
   val V = new {
     //Seed
-    val seeds                       = "4.0.8"
+    val seeds                       = "4.0.9"
     //Test
     val scalaTest                   = "3.0.5"
   }

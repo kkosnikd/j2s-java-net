@@ -6,9 +6,9 @@ import com.zeab.http.seed._
 import java.net.{HttpURLConnection, URL}
 import java.nio.charset.CodingErrorAction
 //Scala
-import scala.collection.JavaConversions._
 import scala.annotation.tailrec
-import scala.concurrent.{ExecutionContext, Future}
+import scala.collection.JavaConversions._
+import scala.concurrent.{ExecutionContext, Future, Promise}
 import scala.io.Codec
 import scala.io.Source.fromInputStream
 import scala.util.{Failure, Success, Try}
@@ -18,13 +18,26 @@ package object j2sjavanet {
   trait HttpClient {
 
     //Http Responses
-    private def asyncHttpResponse(url: String, method: String, body: Option[String] = None, headers: Option[Map[String, String]] = None, metaData: Option[Map[String, String]] = None)(implicit ec: ExecutionContext): Future[Either[HttpError, HttpResponse]] = {
+    private def invokeAsyncHttpResponse(
+                                         url: String,
+                                         method: String,
+                                         body: Option[String] = None,
+                                         headers: Option[Map[String, String]] = None,
+                                         metaData: Option[Map[String, String]] = None)
+                                       (
+                                         implicit ec: ExecutionContext
+                                       ): Future[Either[HttpError, HttpResponse]] = {
       Future {
-        httpResponse(url, method, body, headers, metaData)
+        invokeHttpResponse(url, method, body, headers, metaData)
       }
     }
 
-    private def httpResponse(url: String, method: String, body: Option[String] = None, headers: Option[Map[String, String]] = None, metaData: Option[Map[String, String]] = None): Either[HttpError, HttpResponse] = {
+    private def invokeHttpResponse(
+                                    url: String,
+                                    method: String,
+                                    body: Option[String] = None,
+                                    headers: Option[Map[String, String]] = None,
+                                    metaData: Option[Map[String, String]] = None): Either[HttpError, HttpResponse] = {
 
       //Calculate authorization if one is required
       val combineHeaders = authorization(url, method, body, headers, metaData).getOrElse(Map.empty) ++ headers.getOrElse(Map.empty)
@@ -35,8 +48,6 @@ package object j2sjavanet {
         else {
           Some(combineHeaders)
         }
-
-      val shouldRetry = true
 
       //Open Url Connection
       openConnection(url) match {
@@ -225,14 +236,12 @@ package object j2sjavanet {
     def authorization(url: String, method: String, body: Option[String], headers: Option[Map[String, String]], metaData: Option[Map[String, String]]): Option[Map[String, String]] = HttpHeaders.authorizationBearerHeader(HttpSeedMetaData.bearerCheck(metaData))
 
     case class Seed(httpSeed: HttpSeed) {
-      def toHttpResponse: Either[HttpError, HttpResponse] = httpResponse(httpSeed.url, httpSeed.method, httpSeed.body, httpSeed.headers, httpSeed.metaData)
+      def toHttpResponse: Either[HttpError, HttpResponse] = invokeHttpResponse(httpSeed.url, httpSeed.method, httpSeed.body, httpSeed.headers, httpSeed.metaData)
 
-      def toAsyncHttpResponse(implicit ec: ExecutionContext): Future[Either[HttpError, HttpResponse]] = asyncHttpResponse(httpSeed.url, httpSeed.method, httpSeed.body, httpSeed.headers, httpSeed.metaData)
-
-      def retryHttpResponse(successfulResponseStatus: Int, retryInterval: Int = 1, maxRetry: Int = 5): Either[HttpError, HttpResponse] = {
-        def retry(httpResponse1: Either[HttpError, HttpResponse], startTime: Double): Either[HttpError, HttpResponse] = {
-          def worker(httpResponse1: Either[HttpError, HttpResponse], startTime: Double, retryCount: Int = 0): Either[HttpError, HttpResponse] = {
-            httpResponse1 match {
+      def retryHttpResponse(successfulResponseStatus: Int, maxRetry: Int = 5, retryInterval: Int = 1): Either[HttpError, HttpResponse] = {
+        def retry(httpResponse: Either[HttpError, HttpResponse], startTime: Double): Either[HttpError, HttpResponse] = {
+          def worker(httpResponse: Either[HttpError, HttpResponse], startTime: Double, retryCount: Int = 0): Either[HttpError, HttpResponse] = {
+            httpResponse match {
               case Right(resp) =>
                 if (resp.responseStatus == successfulResponseStatus) {
                   Right(resp)
@@ -243,24 +252,35 @@ package object j2sjavanet {
                   }
                   else {
                     if (((System.nanoTime - startTime) / 1e9) >= retryInterval) {
-                      worker(httpResponse(resp.requestUrl, resp.requestMethod, resp.requestBody, resp.requestHeaders, resp.requestMetaData), System.nanoTime, retryCount + 1)
+                      worker(invokeHttpResponse(resp.requestUrl, resp.requestMethod, resp.requestBody, resp.requestHeaders, resp.requestMetaData), System.nanoTime, retryCount + 1)
                     }
                     else {
-                      worker(httpResponse1, startTime, retryCount)
+                      worker(httpResponse, startTime, retryCount)
                     }
                   }
                 }
-              case Left(ex) => Left(ex)
+              case Left(ex) =>
+                Left(ex)
             }
           }
-          worker(httpResponse1, startTime)
+
+          worker(httpResponse, startTime)
         }
-        retry(httpResponse(httpSeed.url, httpSeed.method, httpSeed.body, httpSeed.headers, httpSeed.metaData), System.nanoTime)
+
+        retry(invokeHttpResponse(httpSeed.url, httpSeed.method, httpSeed.body, httpSeed.headers, httpSeed.metaData), System.nanoTime)
       }
 
-      
+      def toAsyncHttpResponse(implicit ec: ExecutionContext): Future[Either[HttpError, HttpResponse]] = invokeAsyncHttpResponse(httpSeed.url, httpSeed.method, httpSeed.body, httpSeed.headers, httpSeed.metaData)
 
+      def retryAsyncHttpResponse(successfulResponseStatus: Int, maxRetry: Int = 5, retryInterval: Int = 1)(implicit ec: ExecutionContext): Future[Either[HttpError, HttpResponse]] = {
+        val response = Promise[Either[HttpError, HttpResponse]]
+        Future{
+          response.success(retryHttpResponse(successfulResponseStatus, maxRetry, retryInterval))
+        }
+        response.future
+      }
     }
+
   }
 
   object HttpClient extends HttpClient

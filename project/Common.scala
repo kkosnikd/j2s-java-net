@@ -6,7 +6,7 @@ import sbt._
 object Common {
 
   //Manually update Version and Major numbers but auto update Minor number
-  val projectVersion : String = s"1.0.2"
+  val projectVersion : String = s"1.1.1"
 
   //Holds the base project settings
   val baseProjectSettings: Seq[Def.Setting[_]] = Seq(
